@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SQLite × DuckDB 迁移对照台</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">⇄</span>
+    <div>
+      <h1>SQLite × DuckDB 迁移对照台</h1>
+      <p class="subtitle">同一份数据，两个引擎实际建表执行 · 差异定位 · 双方言改写对照</p>
+    </div>
+  </div>
+  <div class="session-box">
+    <span id="session-state" class="badge badge-muted">未创建会话</span>
+    <button id="btn-new-session" class="btn btn-sm">新建隔离会话</button>
+  </div>
+</header>
+
+<main>
+  <!-- ① 数据区 -->
+  <section class="card" id="data-section">
+    <div class="card-head">
+      <h2>① 数据空间（隔离内存，引擎无法访问任何文件）</h2>
+      <div class="head-actions">
+        <button id="btn-load-sample" class="btn btn-primary btn-sm" disabled>载入内置示例 orders.csv</button>
+        <label class="btn btn-sm file-btn">
+          上传 CSV（≤2MB / 2000 行）
+          <input type="file" id="file-upload" accept=".csv,text/csv" hidden>
+        </label>
+      </div>
+    </div>
+    <div id="schema-area" class="schema-area">
+      <p class="hint">尚未导入数据。可载入内置示例（含空值、重复行、日期、字符串数字），或上传自己的 CSV。类型自动推断，可在导入后查看两引擎各自的建表 DDL。</p>
+    </div>
+    <div id="import-notes" class="import-notes"></div>
+  </section>
+
+  <!-- ② 示例与对照配置 -->
+  <section class="card">
+    <div class="card-head"><h2>② 内置对照案例（差异均为引擎真实执行结果）</h2></div>
+    <div id="examples-bar" class="examples-bar"></div>
+    <div id="example-desc" class="example-desc hidden"></div>
+
+    <div class="config-grid">
+      <div class="config-item">
+        <label>业务主键列（逗号分隔，留空=整行集合比较）</label>
+        <input type="text" id="cfg-keys" placeholder="例如 order_id">
+      </div>
+      <div class="config-item small">
+        <label>绝对误差</label>
+        <input type="number" id="cfg-abs-tol" value="0" step="0.0001" min="0">
+      </div>
+      <div class="config-item small">
+        <label>相对误差</label>
+        <input type="number" id="cfg-rel-tol" value="0" step="0.0001" min="0">
+      </div>
+      <div class="config-item small">
+        <label>执行超时(秒, 1–15)</label>
+        <input type="number" id="cfg-timeout" value="5" min="1" max="15">
+      </div>
+      <div class="config-item small switch-item">
+        <label>比较模式</label>
+        <div class="seg">
+          <button type="button" id="mode-set" class="seg-btn active">集合(无序,保重复)</button>
+          <button type="button" id="mode-ordered" class="seg-btn">逐行有序</button>
+        </div>
+      </div>
+    </div>
+    <div class="run-row">
+      <button id="btn-run" class="btn btn-primary" disabled>▶ 两边同时执行并对照</button>
+      <span id="run-status" class="run-status"></span>
+    </div>
+  </section>
+
+  <!-- ③ SQL 双栏 -->
+  <section class="card">
+    <div class="card-head">
+      <h2>③ SQL 编辑器（可分别按方言修改后重新对照）</h2>
+      <div class="head-actions">
+        <button id="btn-copy-left" class="btn btn-sm">左 → 右 同步</button>
+      </div>
+    </div>
+    <div class="sql-grid">
+      <div class="sql-pane pane-sqlite">
+        <div class="pane-title"><span class="dot dot-sqlite"></span>SQLite</div>
+        <textarea id="sql-sqlite" spellcheck="false" placeholder="SELECT ..."></textarea>
+      </div>
+      <div class="sql-pane pane-duckdb">
+        <div class="pane-title"><span class="dot dot-duckdb"></span>DuckDB</div>
+        <textarea id="sql-duckdb" spellcheck="false" placeholder="SELECT ..."></textarea>
+      </div>
+    </div>
+    <p class="hint guard-hint">仅允许单条 SELECT/WITH 只读查询；禁止写操作、PRAGMA、ATTACH、read_csv 等文件函数及路径字面量。超时会调用 interrupt 中断，必要时强制重建引擎连接。</p>
+  </section>
+
+  <!-- ④ 对照结论 -->
+  <section class="card" id="result-section">
+    <div class="card-head"><h2>④ 对照结论</h2></div>
+    <div id="comparison-banner" class="banner hidden"></div>
+    <div id="diff-list" class="diff-list"></div>
+  </section>
+
+  <!-- ⑤ 双引擎结果 -->
+  <section class="card">
+    <div class="card-head"><h2>⑤ 两边实际结果（含字段类型 / 报错 / 耗时）</h2></div>
+    <div class="result-grid">
+      <div class="result-pane" id="pane-result-sqlite">
+        <div class="pane-title"><span class="dot dot-sqlite"></span>SQLite 结果 <span class="engine-meta" id="meta-sqlite"></span></div>
+        <div id="result-sqlite" class="result-body"><p class="hint">尚未执行。</p></div>
+      </div>
+      <div class="result-pane" id="pane-result-duckdb">
+        <div class="pane-title"><span class="dot dot-duckdb"></span>DuckDB 结果 <span class="engine-meta" id="meta-duckdb"></span></div>
+        <div id="result-duckdb" class="result-body"><p class="hint">尚未执行。</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ⑥ 方言速查 -->
+  <section class="card">
+    <div class="card-head"><h2>⑥ 已实测的方言差异速查（不把任一方言伪装成通用标准）</h2></div>
+    <div class="table-wrap">
+      <table id="dialect-table" class="data-table">
+        <thead><tr><th>主题</th><th>SQLite 行为</th><th>DuckDB 行为</th><th>可移植写法</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<!-- 差异下钻抽屉 -->
+<div id="drawer-mask" class="drawer-mask hidden"></div>
+<aside id="drawer" class="drawer hidden">
+  <div class="drawer-head">
+    <h3>差异下钻</h3>
+    <button id="drawer-close" class="btn btn-sm">关闭</button>
+  </div>
+  <div id="drawer-body" class="drawer-body"></div>
+</aside>
+
+<footer class="footer">
+  所有查询在服务端内存引擎中真实执行 · 会话间数据隔离 · 不上传任何数据到外部服务 ·
+  SQLite 内置库 / DuckDB <span id="duck-version"></span>
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
